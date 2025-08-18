@@ -55,8 +55,21 @@ func (s *TiktokDownloader) GetTT() string {
 	return *tt
 }
 
+func (s *TiktokDownloader) extractDirectURL(body string) *string {
+	// safer regex
+	pattern := `data-directurl="([^"]+)"`
+	re := regexp.MustCompile(pattern)
+
+	matches := re.FindStringSubmatch(body)
+	if len(matches) < 2 {
+		return nil
+	}
+
+	return &matches[1]
+}
+
 func (s *TiktokDownloader) extractDownloadURL(body string) *string {
-	pattern := `downloadX\('(.*)'\)"`
+	pattern := `data-directurl="(.*)"`
 	re := regexp.MustCompile(pattern)
 	matches := re.FindStringSubmatch(body)
 	if matches == nil {
@@ -87,8 +100,9 @@ func (s *TiktokDownloader) extractTT(body string) *string {
 
 func (s *TiktokDownloader) getDownloadData(link, tt string) *model.DownloadData {
 	client := &http.Client{}
+	dbg := "ab=1&loc=US&ip=69.69.69.69"
 	// TODO: make tt query dynamic
-	body := fmt.Sprintf("id=%s&locale=en&tt=%s", url.QueryEscape(link), tt)
+	body := fmt.Sprintf("id=%s&locale=en&tt=%s&debug=%s", url.QueryEscape(link), tt, url.QueryEscape(dbg))
 	data := strings.NewReader(body)
 	req, err := http.NewRequest("POST", "https://ssstik.io/abc?url=dl", data)
 	if err != nil {
@@ -120,12 +134,20 @@ func (s *TiktokDownloader) getDownloadData(link, tt string) *model.DownloadData 
 	if err != nil {
 		log.Fatal(err)
 	}
+	directURL := s.extractDirectURL(string(bodyText))
+	if directURL != nil {
+		return &model.DownloadData{
+			DirectURL: *directURL,
+		}
+	}
 	downloadURL := s.extractDownloadURL(string(bodyText))
 	if downloadURL == nil {
+		log.Print("downloadURL not found")
 		return nil
 	}
 	key := s.extractKey(*downloadURL)
 	if key == nil {
+		log.Print("key not found")
 		return nil
 	}
 	return &model.DownloadData{
@@ -134,11 +156,32 @@ func (s *TiktokDownloader) getDownloadData(link, tt string) *model.DownloadData 
 	}
 }
 
+func (s *TiktokDownloader) extractPrefix(url string) *string {
+	// look for `url=` and stop at the first "=="
+	pattern := `url=([^=]+)==`
+	re := regexp.MustCompile(pattern)
+
+	matches := re.FindStringSubmatch(url)
+	if len(matches) < 2 {
+		return nil
+	}
+	return &matches[1]
+}
+
 func (s *TiktokDownloader) processDownloadData(downloadData *model.DownloadData) *string {
 	client := &http.Client{}
-	body := fmt.Sprintf("tt=%s", downloadData.Key)
-	data := strings.NewReader(body)
-	url := fmt.Sprintf("https://ssstik.io%s", downloadData.URL)
+	var url string
+	var data *strings.Reader
+	if downloadData.DirectURL != "" {
+		key := s.extractPrefix(downloadData.DirectURL)
+		body := fmt.Sprintf("tt=%s", *key)
+		data = strings.NewReader(body)
+		url = fmt.Sprintf("https://ssstik.io%s", downloadData.DirectURL)
+	} else {
+		body := fmt.Sprintf("tt=%s", downloadData.Key)
+		data = strings.NewReader(body)
+		url = fmt.Sprintf("https://ssstik.io%s", downloadData.URL)
+	}
 	req, err := http.NewRequest("POST", url, data)
 	if err != nil {
 		log.Fatal(err)
