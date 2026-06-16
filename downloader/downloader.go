@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/itsmenewbie03/go-tiktok-dl/downloader/model"
+	"github.com/itsmenewbie03/go-tiktok-dl/utils"
 )
 
 type TiktokDownloader struct{}
@@ -89,7 +90,7 @@ func (s *TiktokDownloader) extractKey(url string) *string {
 }
 
 func (s *TiktokDownloader) extractTT(body string) *string {
-	pattern := `s_tt\s=\s'(.*)',`
+	pattern := `s_tt\s=\s'(\w+)',`
 	re := regexp.MustCompile(pattern)
 	matches := re.FindStringSubmatch(body)
 	if matches == nil {
@@ -100,7 +101,7 @@ func (s *TiktokDownloader) extractTT(body string) *string {
 
 func (s *TiktokDownloader) getDownloadData(link, tt string) *model.DownloadData {
 	client := &http.Client{}
-	dbg := "ab=1&loc=US&ip=69.69.69.69"
+	dbg := fmt.Sprintf("ab=1&loc=US&ip=%s", utils.RandomUSIP())
 	// TODO: make tt query dynamic
 	body := fmt.Sprintf("id=%s&locale=en&tt=%s&debug=%s", url.QueryEscape(link), tt, url.QueryEscape(dbg))
 	data := strings.NewReader(body)
