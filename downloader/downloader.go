@@ -1,15 +1,17 @@
 package downloader
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
 
+	"github.com/PuerkitoBio/goquery"
+	"github.com/charmbracelet/log"
 	"github.com/itsmenewbie03/go-tiktok-dl/downloader/model"
 	"github.com/itsmenewbie03/go-tiktok-dl/utils"
 )
@@ -67,6 +69,18 @@ func (s *TiktokDownloader) extractDirectURL(body string) *string {
 	}
 
 	return &matches[1]
+}
+
+func (s *TiktokDownloader) extractLowResURL(body []byte) *string {
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
+	if err != nil {
+		log.Fatal(err)
+	}
+	dlURL, ok := doc.Find(".download_link.without_watermark").Attr("href")
+	if !ok {
+		return nil
+	}
+	return &dlURL
 }
 
 func (s *TiktokDownloader) extractDownloadURL(body string) *string {
@@ -135,10 +149,15 @@ func (s *TiktokDownloader) getDownloadData(link, tt string) *model.DownloadData 
 	if err != nil {
 		log.Fatal(err)
 	}
+	withoutWaterMarkURL := s.extractLowResURL(bodyText)
+	if withoutWaterMarkURL == nil {
+		log.Fatal("failed to get url low res url")
+	}
 	directURL := s.extractDirectURL(string(bodyText))
 	if directURL != nil {
 		return &model.DownloadData{
-			DirectURL: *directURL,
+			DirectURL:        *directURL,
+			WithoutWaterMark: *withoutWaterMarkURL,
 		}
 	}
 	downloadURL := s.extractDownloadURL(string(bodyText))
@@ -179,6 +198,7 @@ func (s *TiktokDownloader) processDownloadData(downloadData *model.DownloadData)
 		data = strings.NewReader(body)
 		url = fmt.Sprintf("https://ssstik.io%s", downloadData.DirectURL)
 	} else {
+		log.Warn("DirectURL not found, falling back (this seems be an outdated branch, keeping for compatibility for now)")
 		body := fmt.Sprintf("tt=%s", downloadData.Key)
 		data = strings.NewReader(body)
 		url = fmt.Sprintf("https://ssstik.io%s", downloadData.URL)
@@ -215,7 +235,7 @@ func (s *TiktokDownloader) processDownloadData(downloadData *model.DownloadData)
 	return &downloadURL
 }
 
-func (s *TiktokDownloader) Download(link string) (*string, error) {
+func (s *TiktokDownloader) Download(link string) (*model.DownloadOptions, error) {
 	tt := s.GetTT()
 	downloadData := s.getDownloadData(link, tt)
 	if downloadData == nil {
@@ -225,5 +245,16 @@ func (s *TiktokDownloader) Download(link string) (*string, error) {
 	if downloadURL == nil {
 		return nil, errors.New("failed to fetch download url")
 	}
-	return downloadURL, nil
+	dlURL, err := url.Parse(*downloadURL)
+	if err != nil {
+		return nil, err
+	}
+	lowResURL, err := url.Parse(downloadData.WithoutWaterMark)
+	if err != nil {
+		return nil, err
+	}
+	return &model.DownloadOptions{
+		HDWithoutWaterMark: *dlURL,
+		WithoutWaterMark:   *lowResURL,
+	}, nil
 }
